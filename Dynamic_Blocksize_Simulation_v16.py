@@ -14,8 +14,8 @@ blocks_longterm_weights = [100000]*100000 #list of 100000 previous block longter
 hundred_blocks_weights = [100000]*100 #list of 100 previous block weights (normal weights, not longterm weights)
 previous_effective_longterm_median = 100000
 n = 500000 #number of blocks to simulate
-next_block_bytes = 100000 #initial value of bytes to include in next block
-mempool_unconfirmed = 0
+newly_broadcast_tx_bytes = 100000 #newly broadcasted transaction bytes
+mempool_unconfirmed = 0 # size of mempool bytes
 
 #Data for plotting
 longterm_median_archive=[]
@@ -82,25 +82,39 @@ for i in range(n):
     
     
     #Prepare values for next block
-    #tx ramp
-    if i % 100 == 0:
-        if i < 300000:
-            next_block_bytes += 100000
-        else:
-            next_block_bytes = 300000
     
-    #Calculate mempool size
-    #block_weight= max_next_block_weight #max flood
-    block_weight=min(max_next_block_weight,next_block_bytes + mempool_unconfirmed) #guide with next_block_bytes
+    
+    #TX LINEAR RAMP
+    if i < 300000:
+        newly_broadcast_tx_bytes += 1000
+    else:
+        newly_broadcast_tx_bytes = 300000
+    
+    '''
+    #TX FLOOD
+    newly_broadcast_tx_bytes = max_next_block_weight # uncomment for max size blocks
+    '''
+    
+    '''
+    #TX PARABOLIC RAMP
+    if i < 350000:
+        newly_broadcast_tx_bytes = 4.4e-3 * i**2
+    else:
+        newly_broadcast_tx_bytes = 300000
+    '''
+    
+    #add new tx to mempool
+    mempool_unconfirmed += newly_broadcast_tx_bytes
+    
+    #Calculate size of next block
+    block_weight=min(max_next_block_weight,mempool_unconfirmed) #guide with newly_broadcast_tx_bytes
     
     #account for bytes left out of block
-    if min(max_next_block_weight,next_block_bytes) == max_next_block_weight:
-        mempool_unconfirmed += next_block_bytes - max_next_block_weight
+    if block_weight == mempool_unconfirmed:
+        mempool_unconfirmed = 0
     else:
-        if mempool_unconfirmed > max_next_block_weight - next_block_bytes:
-            mempool_unconfirmed -= max_next_block_weight - next_block_bytes
-        else:
-            mempool_unconfirmed = 0
+        mempool_unconfirmed -= max_next_block_weight
+        
     
     #Store data for plotting
     longterm_median_archive.append(effective_longterm_median)
