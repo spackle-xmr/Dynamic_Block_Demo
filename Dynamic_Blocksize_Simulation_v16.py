@@ -47,7 +47,7 @@ for i in range(n):
     effective_longterm_median= max(300000, median_100000blocks_longterm_weights) # effective longterm median for current block
     
     #longterm_block_weight= min(block_weight, 1.4 * previous_effective_longterm_median) #longterm block weight
-    longterm_block_weight= max(min(block_weight, 1.7 * previous_effective_longterm_median), 300000, previous_effective_longterm_median / 1.7) #v16 longterm block weight
+    longterm_block_weight= max(min(block_weight, 1.7 * previous_effective_longterm_median), 300000, previous_effective_longterm_median / 1.7) #v16
     
     cumulative_weights_median= max(300000,min(max(300000, median_100_blocks_weights), 50 * effective_longterm_median)) #cumulative weights median
     
@@ -57,7 +57,6 @@ for i in range(n):
     P= B * ((block_weight/cumulative_weights_median)-1)**2 #Block Reward Penalty
     if ((block_weight/cumulative_weights_median)-1)**2 < 0:
         P = 0
-    #P= B * ((block_weight/effective_longterm_median)-1)**2 #Block Reward Penalty # v16 ?
     
     smallest_median= max(300000,min(median_100_blocks_weights, effective_longterm_median))
     
