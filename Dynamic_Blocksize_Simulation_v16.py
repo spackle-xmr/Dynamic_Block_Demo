@@ -2,8 +2,7 @@
 # This is a work in progress. Use at your own peril.
 
 import bisect 
-#import math
-#from statistics import median
+
 
 # Initialization
 B = 0.6 #base block reward
@@ -69,13 +68,15 @@ for i in range(n):
     ###########################################################################
     
     #Update longterm weights
-    sorted_blocks_longterm_weights.remove(blocks_longterm_weights[0]) 
+    remove_item= bisect.bisect_left(sorted_blocks_longterm_weights, blocks_longterm_weights[0])
+    sorted_blocks_longterm_weights.pop(remove_item)
     blocks_longterm_weights.pop(0)
     blocks_longterm_weights.append(longterm_block_weight)
     bisect.insort(sorted_blocks_longterm_weights, longterm_block_weight)
     
     #Update block weights
-    sorted_hundred_blocks_weights.remove(hundred_blocks_weights[0])
+    remove_item= bisect.bisect_left(sorted_hundred_blocks_weights, hundred_blocks_weights[0])
+    sorted_hundred_blocks_weights.pop(remove_item)
     hundred_blocks_weights.pop(0)
     hundred_blocks_weights.append(block_weight)
     bisect.insort(sorted_hundred_blocks_weights, block_weight)
@@ -89,6 +90,7 @@ for i in range(n):
         newly_broadcast_tx_bytes += 1000
     else:
         newly_broadcast_tx_bytes = 300000
+    
     
     '''
     #TX FLOOD
