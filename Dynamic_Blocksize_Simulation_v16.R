@@ -9,9 +9,9 @@ B = 0.6 #base block reward
 block_weight = 100000 #first new block_weight for running simulation
 TW_ref = 3000 #reference transaction weight for fee
 cumulative_median_ref = 300000 #reference median for fee.
-blocks_longterm_weights = rep(100000, 100000) #list of 100000 previous block longterm weights
+blocks_longterm_weights = rep(300000, 100000) #list of 100000 previous block longterm weights
 hundred_blocks_weights = rep(100000, 100) #list of 100 previous block weights (normal weights, not longterm weights)
-previous_effective_longterm_median = 100000
+previous_effective_longterm_median = 300000
 n = 500000 #number of blocks to simulate
 newly_broadcast_tx_bytes = 100000 #newly broadcasted transaction bytes
 mempool_unconfirmed = 0 # size of mempool bytes
@@ -43,7 +43,7 @@ bisect.insort <- function(a, x) {
 for (i in seq_len(n)) {
   
   #Process Current Block
-  ###########################################################################
+  
   #Calculate Medians
   median_100000blocks_longterm_weights= median(sorted_blocks_longterm_weights) #Median calculation for longterm weight
   median_100_blocks_weights= median(sorted_hundred_blocks_weights) #Median calculation for shortterm weight
@@ -64,17 +64,15 @@ for (i in seq_len(n)) {
   
   
   P= B * ((block_weight/cumulative_weights_median)-1)**2 #Block Reward Penalty
-  if ( ((block_weight/cumulative_weights_median)-1)**2 < 0 ) {
+  if ( (block_weight/cumulative_weights_median)-1 <= 0 ) {
     P = 0
   }
   
   smallest_median= max(c(300000,min(c(median_100_blocks_weights, effective_longterm_median))))
   
-  #f_min_actual = B * (1/smallest_median) * (TW_ref/cumulative_median_ref) * (1/5)
-  f_min_actual = B * (1/(smallest_median**2)) * (TW_ref/cumulative_median_ref) # v16
+  f_min_actual = 0.95 * B * TW_ref / (effective_longterm_median**2) # Minimum fee per byte v16
   
   previous_effective_longterm_median= effective_longterm_median #Store current effective longterm median
-  ###########################################################################
   
   #Update longterm weights
   remove_item= findInterval(blocks_longterm_weights[1], sorted_blocks_longterm_weights, rightmost.closed = TRUE)
