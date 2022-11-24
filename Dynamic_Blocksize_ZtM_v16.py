@@ -1,17 +1,15 @@
-# Simulation of transaction ramp
 # This is a work in progress. Use at your own peril.
 
 import bisect 
-
 
 # Initialization
 B = 0.6 #base block reward
 block_weight = 100000 #first new block_weight for running simulation
 TW_ref = 3000 #reference transaction weight for fee
 cumulative_median_ref = 300000 #reference median for fee.
-blocks_longterm_weights = [100000]*100000 #list of 100000 previous block longterm weights
+blocks_longterm_weights = [300000]*100000 #list of 100000 previous block longterm weights
 hundred_blocks_weights = [100000]*100 #list of 100 previous block weights (normal weights, not longterm weights)
-previous_effective_longterm_median = 100000
+previous_effective_longterm_median = 300000
 n = 500000 #number of blocks to simulate
 newly_broadcast_tx_bytes = 100000 #newly broadcasted transaction bytes
 mempool_unconfirmed = 0 # size of mempool bytes
@@ -39,7 +37,7 @@ weights_mid= len(hundred_blocks_weights) // 2
 for i in range(n):
     
     #Process Current Block
-    ###########################################################################
+
     #Calculate Medians
     median_100000blocks_longterm_weights= (sorted_blocks_longterm_weights[longterm_mid] + sorted_blocks_longterm_weights[~longterm_mid]) / 2 #Faster median calculation for longterm weight
     median_100_blocks_weights= (sorted_hundred_blocks_weights[weights_mid] + sorted_hundred_blocks_weights[~weights_mid]) / 2 #Faster median calculation for shortterm weight
@@ -55,16 +53,12 @@ for i in range(n):
     
     
     P= B * ((block_weight/cumulative_weights_median)-1)**2 #Block Reward Penalty
-    if ((block_weight/cumulative_weights_median)-1)**2 < 0:
+    if (block_weight/cumulative_weights_median)-1 < 0:
         P = 0
     
-    smallest_median= max(300000,min(median_100_blocks_weights, effective_longterm_median))
+    f_min_actual = 0.95 * B * TW_ref / (effective_longterm_median**2) # Minimum fee per byte v16
     
-    #f_min_actual = B * (1/smallest_median) * (TW_ref/cumulative_median_ref) * (1/5)
-    f_min_actual = B * (1/(smallest_median**2)) * (TW_ref/cumulative_median_ref) # v16
-    
-    previous_effective_longterm_median= effective_longterm_median #Store current effective longterm median
-    ###########################################################################
+    previous_effective_longterm_median = effective_longterm_median #Store current effective longterm median
     
     #Update longterm weights
     remove_item= bisect.bisect_left(sorted_blocks_longterm_weights, blocks_longterm_weights[0])
