@@ -23,6 +23,7 @@ M_B_archive = [] # Block weight archive
 M_N_archive = [] # Penalty median archive
 mempool_archive = [] # mempool archive
 P_archive = [] # Penalty archive
+F_T_archive = [] # Additional fee to overcome penalty increase archive
 f_I_archive = [] # Minimum fee per byte archive
 
 #Median calculation speedup
@@ -33,7 +34,7 @@ M_S_mid = len(M_S_list) // 2
 
 
 # Process n blocks
-n=1000000
+n= 500000
 for i in range(n):
     
     # Median calculations
@@ -51,6 +52,10 @@ for i in range(n):
         P_B = 0
     
     # Fee Calculations
+    B_T = T_R / M_N # Increase from adding additional transaction to block, using T_R as placeholder
+    F_T = R_Base * (2 * B * B_T + B_T**2) # Additional fee required to overcome the increase in penalty, F_T = P_T
+    if B + B_T <= 0:
+        F_T = 0
     f_I = 0.95 * R_Base * T_R / (M_L**2) # Minimum fee per byte, M_F = M_L
     
     # Prepare values for next block
@@ -58,8 +63,8 @@ for i in range(n):
     
     #Simulate tx ramp
     mempool += 1000 * i # Add newly broadcast tx bytes to mempool
-    if i > 500000:
-        mempool = 0
+    if i > 350000:
+        mempool = 100000
     
     M_B = min(M_B_max, mempool) # Calculate size of next block
     # Calculate size of mempool
@@ -88,6 +93,7 @@ for i in range(n):
     M_N_archive.append(M_N) # Penalty median archive
     mempool_archive.append(mempool)
     P_archive.append(P_B) # Penalty archive
+    F_T_archive.append(F_T) # Additional fee to overcome penalty increase archive
     f_I_archive.append(f_I) # Minimum fee per byte archive
     
     if i % 10000 == 0: print('Running iteration ', i)
