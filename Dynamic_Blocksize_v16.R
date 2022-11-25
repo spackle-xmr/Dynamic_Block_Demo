@@ -19,7 +19,7 @@ M_L_list = rep(300000, 100000) #list of 100000 previous M_L values
 M_S_list = rep(100000, 100) #list of 100 previous M_S values
 mempool = 0 # Size of unconfirmed transactions, bytes
 newly_broadcast_tx_bytes = 0 #newly broadcasted transaction bytes
-n=300000 # Number of blocks to simulate
+n=500000 # Number of blocks to simulate
 
 #Data for plotting
 M_L_archive = vector("numeric", n) # Long term median archive
@@ -29,6 +29,7 @@ M_B_archive = vector("numeric", n) # Block weight archive
 M_N_archive = vector("numeric", n) # Penalty median archive
 mempool_archive = vector("numeric", n) # mempool archive
 P_archive = vector("numeric", n) # Penalty archive
+F_T_archive = vector("numeric", n) # Additional tx fee to overcome penalty increase archive
 f_I_archive = vector("numeric", n) # Minimum fee per byte archive
 
 
@@ -56,6 +57,11 @@ for (i in seq_len(n)) {
   }
    
   # Fee Calculations
+  B_T = T_R / M_N # Increase from adding additional transaction to block, using T_R as placeholder
+  F_T = R_Base * (2 * B * B_T + B_T**2) # Additional tx fee required to overcome the increase in penalty, F_T = P_T
+  if ( B + B_T <= 0 ) {
+    F_T = 0
+  }
   f_I = 0.95 * R_Base * T_R / (M_L**2) # Minimum fee per byte, M_F = M_L
   
   # Prepare values for next block
@@ -64,9 +70,9 @@ for (i in seq_len(n)) {
   #Simulate tx ramp
   newly_broadcast_tx_bytes = newly_broadcast_tx_bytes + 1000
   mempool = mempool + newly_broadcast_tx_bytes # Add newly broadcast tx bytes to mempool
-  #if ( i > 500000) {
-  #  mempool = 0
-  #}
+  if ( i > 350000 ) {
+    mempool = 100000
+  }
   
   M_B = min(c(M_B_max, mempool)) # Calculate size of next block
   # Calculate size of mempool
@@ -90,6 +96,7 @@ for (i in seq_len(n)) {
   M_N_archive[i] <- M_N # Penalty median archive
   mempool_archive[i] <- mempool
   P_archive[i] <- P_B # Penalty archive
+  F_T_archive[i] <- F_T # Additional fee to overcome penalty increase archive
   f_I_archive[i] <- f_I # Minimum fee per byte archive
   
   if ( i %% 10000 == 0) {
@@ -123,6 +130,10 @@ dev.off()
 
 png("Plots/R/P_archive-R.png")
 plot(P_archive, type = "l")
+dev.off()
+
+png("Plots/R/F_T_archive-R.png")
+plot(F_T_archive, type = "l")
 dev.off()
 
 png("Plots/R/f_I_archive-R.png")
