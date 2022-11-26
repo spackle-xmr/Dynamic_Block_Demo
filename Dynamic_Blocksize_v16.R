@@ -19,7 +19,7 @@ M_L_list = rep(300000, 100000) #list of 100000 previous M_L values
 M_S_list = rep(100000, 100) #list of 100 previous M_S values
 mempool = 0 # Size of unconfirmed transactions, bytes
 newly_broadcast_tx_bytes = 0 #newly broadcasted transaction bytes
-n=500000 # Number of blocks to simulate
+n = 500000 # Number of blocks to simulate
 
 #Data for plotting
 M_L_archive = vector("numeric", n) # Long term median archive
@@ -55,11 +55,18 @@ for (i in seq_len(n)) {
   if ( B <= 0 ) {
     P_B = 0
   }
-   
+  
+  
   # Fee Calculations
-  B_T = T_R / M_N # Increase from adding additional transaction to block, using T_R as placeholder
-  F_T = R_Base * (2 * B * B_T + B_T**2) # Additional tx fee required to overcome the increase in penalty, F_T = P_T
-  if ( B + B_T <= 0 ) {
+  T_T = T_R # tx size for F_T calculation, using reference tx size for demonstration
+  B_F_T = B # B value used to calculate F_T
+  if ( (M_N - T_T < M_B) && (M_B < M_N) ) { # If only a part of T_T is in penalty zone
+    T_T = T_T - (M_N - M_B) # consider only portion of tx in penalty zone
+    B_F_T = 0 # set (B value used to calculate F_T) = 0
+  } 
+  B_T = T_T / M_N # Increase from adding additional transaction to block, using T_R as placeholder
+  F_T = R_Base * (2 * B_F_T * B_T + B_T**2) # Additional tx fee required to overcome the increase in penalty, F_T = P_T
+  if ( B_F_T + B_T <= 0 ) {
     F_T = 0
   }
   f_I = 0.95 * R_Base * T_R / (M_L**2) # Minimum fee per byte, M_F = M_L
@@ -81,7 +88,7 @@ for (i in seq_len(n)) {
   } else {
     mempool = mempool - M_B # remove M_B from mempool
   }
-    
+  
   # Update Long Term Median Lists
   M_L_list <- c(M_L_list[-1], M_L_weight) # Remove oldest entry, and add current M_L
   
