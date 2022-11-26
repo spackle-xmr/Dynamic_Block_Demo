@@ -1,6 +1,7 @@
 import bisect
 
 # Initialization
+n = 500000 # Number of blocks to simulate
 T_R = 3000 # reference transaction weight for fee
 Z_M = 300000 # Guaranteed penalty free zone
 M_B = 100000 # Block weight in bytes
@@ -32,10 +33,23 @@ M_L_mid = len(M_L_list) // 2
 sorted_M_S_list = sorted(M_S_list)
 M_S_mid = len(M_S_list) // 2
 
+# Function for controlling tx input to model
+def tx_input(): 
+    global selection
+    if i == 0:
+        print("Welcome! This is a Monero dynamic block size simulator. You have some options...")
+        print("1. Linear Transaction Ramp")
+        print("2. Parabolic Transaction Ramp")
+        print("3. Exponential Transaction Ramp")
+        print("4. Maximum flood")
+        selection = input("Type the number for your selection and press enter: ")
+    if selection == '1': controlled_input = 100000 + 1000 * i # Linear Ramp
+    if selection == '2': controlled_input = (1000+(i/15))**2 # Parabolic Ramp
+    if selection == '3': controlled_input = 300000*(1.6**(9.7 + (i / 50000))) # Exponential Ramp
+    if selection == '4': controlled_input = M_B_max # Maximum tx flood
+    return controlled_input
 
-# Process n blocks
-n= 500000
-for i in range(n):
+for i in range(n): # Process n blocks
     
     # Median calculations
     M_L_from_list = (sorted_M_L_list[M_L_mid] + sorted_M_L_list[~M_L_mid]) / 2 # Median of list of long term weights
@@ -48,30 +62,27 @@ for i in range(n):
     # Penalty calculation
     B = (M_B / M_N) - 1
     P_B = R_Base * B**2
-    if B <= 0:
-        P_B = 0
+    if B <= 0: P_B = 0 # P_B calculation only nonzero for B > 0
     
     # Fee Calculations
-    B_T = T_R / M_N # Increase from adding additional transaction to block, using T_R as placeholder
-    F_T = R_Base * (2 * B * B_T + B_T**2) # Additional fee required to overcome the increase in penalty, F_T = P_T
-    if B + B_T <= 0:
-        F_T = 0
+    T_T = T_R # tx size for F_T calculation, using reference tx size for demonstration
+    B_F_T = B # B value used to calculate F_T
+    if M_N - T_T < M_B < M_N: # If only a part of T_T is in penalty zone
+        T_T = T_T - (M_N - M_B) # consider only portion of tx in penalty zone
+        B_F_T = 0 # set (B value used to calculate F_T) = 0
+    B_T = T_T / M_N # Increase from adding additional transaction to block
+    F_T = R_Base * (2 * B_F_T * B_T + B_T**2) # Additional fee required to overcome the increase in penalty, F_T = P_T
+    if B_F_T + B_T <= 0: F_T = 0 # calculated F_T only valid for B + B_T > 0
     f_I = 0.95 * R_Base * T_R / (M_L**2) # Minimum fee per byte, M_F = M_L
     
     # Prepare values for next block
     M_B_max = 2 * M_N # Maximum weight of next block
-    
-    #Simulate tx ramp
-    mempool += 1000 * i # Add newly broadcast tx bytes to mempool
-    if i > 350000:
-        mempool = 100000
-    
+    mempool += tx_input() # Add newly broadcast tx bytes to mempool
     M_B = min(M_B_max, mempool) # Calculate size of next block
+    
     # Calculate size of mempool
-    if M_B == mempool: # If M_B includes entire mempool
-        mempool = 0 # mempool is now empty
-    else:
-        mempool -= M_B # remove M_B from mempool
+    if M_B == mempool: mempool = 0 # if mempool fully emptied into block it is zero
+    else: mempool -= M_B # else subtract block bytes from mempool
     
     # Update Long Term Median Lists
     sorted_M_L_list.pop(bisect.bisect_left(sorted_M_L_list, M_L_list[0])) # Remove oldest M_L value from sorted_M_L_list
@@ -96,4 +107,4 @@ for i in range(n):
     F_T_archive.append(F_T) # Additional fee to overcome penalty increase archive
     f_I_archive.append(f_I) # Minimum fee per byte archive
     
-    if i % 10000 == 0: print('Running iteration ', i)
+    if i % 10000 == 0: print('Running iteration ', i) # Print running status
