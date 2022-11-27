@@ -38,14 +38,14 @@ def tx_input():
     global selection
     if i == 0:
         print("Welcome! This is a Monero dynamic block size simulator. You have some options...")
-        print("1. Linear Transaction Ramp")
-        print("2. Parabolic Transaction Ramp")
-        print("3. Exponential Transaction Ramp")
+        print("1. Fast Linear Transaction Ramp")
+        print("2. Fast Parabolic Transaction Ramp")
+        print("3. Fast Exponential Transaction Ramp")
         print("4. Maximum flood")
         selection = input("Type the number for your selection and press enter: ")
-    if selection == '1': controlled_input = 100000 + 1000 * i # Linear Ramp
-    if selection == '2': controlled_input = (1000+(i/15))**2 # Parabolic Ramp
-    if selection == '3': controlled_input = 300000*(1.6**(9.7 + (i / 50000))) # Exponential Ramp
+    if selection == '1': controlled_input = 100000 + 1000 * i # Fast Linear Ramp starting at 100k
+    if selection == '2': controlled_input = (316 + (i / 15))**2 # Fast Parabolic Ramp starting at 100k
+    if selection == '3': controlled_input = 300000 * (1.6**(9.8 + (i / 50000)) - 99.75)  # Fast Exponential Ramp starting at 100k
     if selection == '4': controlled_input = M_B_max # Maximum tx flood
     return controlled_input
 
