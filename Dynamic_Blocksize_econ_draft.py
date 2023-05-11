@@ -129,7 +129,7 @@ for i in range(n): # Process n blocks
     #Control the fee level response
     previous_percent_response = percent_response
     percent_response_calc = math.floor((mempool[1] / (3 * broadcast[1])) * 100)
-    percent_response = math.floor(previous_percent_response + 0.005 * (percent_response_calc-previous_percent_response))
+    percent_response = math.floor(previous_percent_response + 0.1 * (percent_response_calc-previous_percent_response))
     
     # if percent_response == 0: # Do nothing
     if percent_response > 100: percent_response = 100 # high fees only
