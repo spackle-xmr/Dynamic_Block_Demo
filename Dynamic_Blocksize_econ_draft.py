@@ -11,9 +11,9 @@ WALLET_CALC = 0 # Select whether to perform Wallet calculations. MUCH SLOWER
 PLOT_RESULT = 0 # Select whether to create plots/animations
 
 # Initialization
-n = 10000 # Number of blocks to simulate
+n = 2000 # Number of blocks to simulate
 B = 0 
-F_T = 0
+F_T = 0 # Additional fee to overcome penalty increase
 T_R = 3000 # Reference tx weight for fee
 Z_M = 300000 # Guaranteed penalty free zone
 M_B = 100000 # Block weight in bytes
@@ -39,7 +39,8 @@ mempool = [0]*2 # List of unconfirmed tx
 fees = [0]*2 # fees paid at each level of mempool
 block_fee_total = 0 # total fee paid to create block
 blockfilled = [0]*2 # tx in mempool that failed to pay enough fees
-cheapest_fee_set = []
+fee_set = [] # Calculated fee amount that must be paid to add each tx to a block.
+percent_response = 0
 
 # Initialize Wallet Fee Lists
 M_LW_prev = 300000 # Previously effective long term wallet fee median
@@ -63,12 +64,13 @@ M_B_archive = [] # Block weight archive
 M_N_archive = [] # Penalty median archive
 broadcast_archive = [[0,0] for i in range(n)] # broadcast archive
 mempool_archive = [[0,0] for i in range(n)] # Mempool archive
-cheapest_fee_archive = []
+blockfilled_archive = [[0,0] for i in range(n)] # blockfilled archive
+fee_sum_archive = []
 P_archive = [] # Penalty archive
-Block_fee_archive = [] # Fees paid by tx included in block
-F_T_archive = [] # Fee needed to add another tx to block
+Block_fee_archive = [] # Fees paid by tx included in block archive
+F_T_archive = [] # Fee needed to add another tx to block archive
 f_I_archive = [] # Minimum fee per byte archive
-
+input_volume_archive = [] # Broadcast tx volume archive (not split into fee levels)
 
 for i in range(n): # Process n blocks
     
@@ -84,11 +86,14 @@ for i in range(n): # Process n blocks
     
     # Define fees paid for each tx fee level
     fees[1] = f_I * T_R # lowest fee
-    fees[0] = 16 * fees[1] # normal fee
+    fees[0] = 16 * fees[1] # medium fee
     
-    #tx_handler() # Broadcast new tx
-    blockfilled[0] = 0
+    
+    # Broadcast new tx
+    blockfilled[0] = 0  # Clear the record of tx which filled the last block
     blockfilled[1] = 0
+    broadcast[0] = 0 # Clear the record of previously broadcast tx
+    broadcast[1] = 0
     
     if i == 0:
         print("Welcome! This is a Monero dynamic block size simulator. You have some options...")
@@ -97,49 +102,66 @@ for i in range(n): # Process n blocks
         print("3. Fast Parabolic Transaction Ramp")
         print("4. Fast Exponential Transaction Ramp")
         print("5. Maximum flood")
+        print("6. Configurable Transaction Ramp")
         #selection = input("Type the number for your selection and press enter: ")
-        selection = '1'
-    if selection == '1': 
-        broadcast[1] = (300000 + 100 * i) // T_R # Linear Ramp
-        
-        response = math.floor((mempool[1] / (2 * broadcast[1])) * 100)
-        if response > 0:
-            broadcast[0] = ((broadcast[1] * response) // 100)
-            broadcast[1] = (broadcast[1] * (100 - response)) // 100
-        
-        
-        '''
-        if mempool[1] > 0:
-            broadcast[1] = broadcast[1] // 4
-            broadcast[0] = (broadcast[1] * 3)
-        if mempool[1] > 2 * broadcast[1]:
-            broadcast[0] = broadcast[1]
-            broadcast[1] = 0
-        '''
-    else:
-        broadcast[0] = 0
-        broadcast[1] = 20
-            
+        selection = '6'
+    
+    if selection == '1': broadcast[1] = (300000 + 100 * i) // T_R  #Linear Ramp
     if selection == '2': broadcast[1] = (300000 + 10 * i) // T_R  # Fast Linear Ramp starting at 100k
     if selection == '3': broadcast[1] = ((316 + (i / 15))**2) // T_R # Fast Parabolic Ramp starting at 100k
     if selection == '4': broadcast[1] = (300000 * (1.6**(9.8 + (i / 50000)) - 99.75)) // T_R  # Fast Exponential Ramp starting at 100k
     if selection == '5': broadcast[1] = M_B_max // T_R  # Maximum tx flood
+    if selection == '6': 
+        start_val = 100000 # Starting tx volume
+        ramp_multiplier = 10 # Ending tv volume / starting tx volume
+        ramp_delay = 100 # Wait to start ramping
+        ramp_days = 2
+        ramp_time = ramp_days*720 # Time for ramp to occur
+        
+        if i <= ramp_delay: broadcast[1] = start_val // T_R #start with 100kB blocks for the first 100 blocks 
+        if ramp_delay < i <= ramp_delay + ramp_time: #Ramp from 100kB to 1MB blocks over 720 blocks
+            broadcast[1] = (start_val + math.floor((ramp_multiplier - 1)*start_val/ramp_time) * (i - ramp_delay)) // T_R # Define total broadcast data volume during ramp
+        if i > ramp_delay + ramp_time: 
+            broadcast[1] = ramp_multiplier * start_val // T_R # Ramp finished, broadcast 1MB blocks continuously
+    
+    input_volume_archive.append(broadcast[1])
+    # Check broadcast volume against mempool size. If mempool is already large, have broadcast tx pay higher fees
+    #Control the fee level response
+    previous_percent_response = percent_response
+    percent_response_calc = math.floor((mempool[1] / (3 * broadcast[1])) * 100)
+    percent_response = math.floor(previous_percent_response + 0.005 * (percent_response_calc-previous_percent_response))
+    
+    # if percent_response == 0: # Do nothing
+    if percent_response > 100: percent_response = 100 # high fees only
+    if 0 < percent_response <= 100: # Mark some tx with higher fee
+        broadcast[0] = ((broadcast[1] * percent_response) // 100)
+        broadcast[1] = (broadcast[1] * (100 - percent_response)) // 100
+    
     
     # Update mempool with broadcast
     for j in range(len(mempool)):
         mempool[j] += broadcast[j]
+        
     
-    # Build block
+    # Build next block
     M_B = 0 # Begin building from empty block
     block_fee_total = 0 
-    cheapest_fee_set.clear()
+    fee_set.clear()
+    break_flag = 0
     
     for k in range(len(mempool)): # for all fee levels
-        for l in range(mempool[k]): # for all tx at a given fee level
+        if break_flag == 1: break # Nested break condition triggered
+        for l in range(int(mempool[k])): # for all tx at a given fee level, check if fees justify adding tx to block and respond accordingly
+            
+            # Check if we are allowed to grow the block. If not, stop adding tx to block
+            if M_B >= M_B_max:
+                blockfilled[0] = k # save fee failure
+                blockfilled[1] = l # save tx number failure
+                break_flag = 1
+                break
+        
             M_B += T_R # Add tx size to block
             
-            
-            # NEED TO CHECK FOR MAXIMUM BLOCK SIZE!
             
             # Check necessary fees to expand block to new size
             B = (M_B / M_N) - 1 # B can be thought of as % increase in block weight
@@ -150,59 +172,47 @@ for i in range(n): # Process n blocks
                 B_F_T = 0 # Set (B value used to calculate F_T) = 0
             B_T = T_T / M_N # Increase from adding additional tx to block
             F_T = R_Base * (2 * B_F_T * B_T + B_T**2) # Additional fee required to overcome the increase in penalty, F_T = P_T
-            if B_F_T + B_T <= 0: F_T = 0 # Calculated F_T only valid for B + B_T > 0
+            if B_F_T + B_T <= 0: 
+                F_T = 0 # Calculated F_T only valid for B + B_T > 0
             
             # Load cheapest fee set with the cheapest fees possible for each tx
-            if M_B == 300000:
-                for m in range(100):
-                    cheapest_fee_set.append(0)
-                    cheapest_fee_set[m] = F_T
-            if M_B > 300000:
-                cheapest_fee_set.append(F_T)
+            fee_set.append(F_T)
             
 
             if fees[k] < F_T: # If not enough fees paid
                 M_B -= T_R # Remove proposed tx from block
                 blockfilled[0] = k # save fee failure
                 blockfilled[1] = l # save tx number failure
+                break_flag = 1
                 break
+
+    #print("M_B", M_B)
+    #print("mempool0 bytes", mempool[0] * 3000)
     
-    # sweep fee set so all values below index are >= itself. This is what much realistically happen for a miner to include the txs
-    largest_so_far = 0
-    for p in range(len(cheapest_fee_set)):
-        if cheapest_fee_set[len(cheapest_fee_set) - (1 + p)] > largest_so_far:
-            largest_so_far = cheapest_fee_set[len(cheapest_fee_set) - (1 + p)] 
-        else:
-            cheapest_fee_set[len(cheapest_fee_set) - (1 + p)] = largest_so_far
-        
+    if all(num == 0 for num in blockfilled):
+        if mempool[1] != 0:
+            blockfilled[0] = 1
+            blockfilled[1] = mempool[1]
+        elif mempool [0] != 0:
+            blockfilled[0] = 0
+            blockfilled[1] = mempool[0]
     
-    
-    # Calculate fees paid to create block
-    if all(index == 0 for index in blockfilled):
-        for k in range(len(mempool)): # for all fee levels
-            block_fee_total += mempool[k] * fees[k]
-    else:
-        for k in range(blockfilled[0]):
-            block_fee_total += mempool[k] * fees[k]
-        block_fee_total += (blockfilled[1] - 1) * fees[blockfilled[0]]
+    # Calculate fees paid to create block REVIEW
+    for k in range(blockfilled[0]):
+        block_fee_total += mempool[k] * fees[k]
+    block_fee_total += (blockfilled[1] - 1) * fees[blockfilled[0]]
     
     # Clear mempool of tx included in block
-    if all(index == 0 for index in blockfilled):
-        # Entire mempool fit into next block, clear it
-        for k in range(len(mempool)): # for all fee levels
-            mempool[k] = 0
-    else: 
-        # Remove included tx from mempool
-        for k in range(blockfilled[0]):
-            mempool[k] = 0
-        mempool[blockfilled[0]] -= blockfilled[1] - 1
+    # Remove included tx from mempool
+    for k in range(blockfilled[0]):
+        mempool[k] = 0
+    mempool[blockfilled[0]] -= blockfilled[1]
     
     
     # Penalty calculation for entire block
     B = (M_B / M_N) - 1 # B can be thought of as % increase in block weight
     P_B = R_Base * B**2 # Calculate Penalty value
     if B <= 0: P_B = 0 # Penalty calculation only valid for B > 0
-    
     
     
     # Update Long Term Median Lists
@@ -264,7 +274,8 @@ for i in range(n): # Process n blocks
     for item in range(len(mempool)):
         mempool_archive[i][item] = mempool[item]
         broadcast_archive[i][item] = broadcast[item] # broadcast archive
-    cheapest_fee_archive.append(sum(cheapest_fee_set))
+        blockfilled_archive[i][item] = blockfilled[item]
+    fee_sum_archive.append(sum(fee_set))
     F_T_archive.append(F_T)
     P_archive.append(P_B) # Penalty archive
     Block_fee_archive.append(block_fee_total) # Additional fee to overcome penalty increase archive
@@ -274,72 +285,69 @@ for i in range(n): # Process n blocks
 
 
 if PLOT_RESULT == 1:
-    # Plotting --this is kinda rough--
-    multival = 50 # Points per frame, allows faster plotting.
-    multiscale = 2 # Scaling rate for multival.
-    extra = 0 # Correction for multival transition
-    x_adjustments = 0 # Number of times x axis has ranged
+    
+    multival = 10 # Points per frame, allows faster plotting.
+    
     x = list(range(n)) # List counting up to number of simulated blocks
     fig, ((ax0, ax1), (ax2, ax3)) = plt.subplots(2,2) # Figure with two subplots
     fig.suptitle('Dynamic Block Demonstration')
-    ax0.set(ylabel="Block Size")
-    ax1.set(ylabel="Mempool Size")
-    ax2.set(xlabel="Block", ylabel="Total fees paid for block")
+    ax1.set(ylabel="Block Size")
+    ax0.set(ylabel="Transactions Broadcast to Network")
+    ax2.set(xlabel="Block", ylabel="Total fees per block")
     ax3.set(xlabel="Block", ylabel="Penalty")
+    
+    ax0.yaxis.label.set_size(20)
+    ax1.yaxis.label.set_size(20)
+    ax2.yaxis.label.set_size(20)
+    ax3.yaxis.label.set_size(20)
+    ax2.xaxis.label.set_size(20)
+    ax3.xaxis.label.set_size(20)
+    
     line0, = ax0.plot([], [], lw=2, color='g')
     line1, = ax1.plot([], [], lw=2, color='c')
     line2, = ax2.plot([], [], lw=2, color='b')
     line3, = ax3.plot([], [], lw=2, color='r')
     line = [line0, line1, line2, line3]
-    ax0.set_ylim(0, 5e5) # Block Size
-    ax0.set_xlim(0, 2000)
-    ax0.grid()
-    ax1.set_ylim(0, 1e7) # Mempool Size
-    ax1.set_xlim(0, 2000)
+    ax1.set_ylim(0, 1.1 * max(M_B_archive)) # Block Size
+    ax1.set_xlim(0, n)
     ax1.grid()
-    ax2.set_ylim(0, 5e-4) # Total fees paid for block
-    ax2.set_xlim(0, 2000)
+    ax0.set_ylim(0, 1.1 * max(input_volume_archive)) # Transaction Volume
+    ax0.set_xlim(0, n)
+    ax0.grid()
+    ax2.set_ylim(0, 1.1 * max(Block_fee_archive)) # Total fees paid for block
+    ax2.set_xlim(0, n)
     ax2.grid()
-    ax3.set_ylim(0,5e-2) # Penalty
-    ax3.set_xlim(0, 2000)
+    ax3.set_ylim(0, 1.1 * max(P_archive)) # Penalty
+    ax3.set_xlim(0, n)
     ax3.grid()
     
     
     def animate(i):
-        global multival, extra, x_adjustments
-        # Autorange axes and plotting speed
+        
+        global multival
+        # plotting speed
         for ax in [ax0, ax1, ax2, ax3]:
             xmin, xmax = ax.get_xlim()
             ymin, ymax = ax.get_ylim()
-            if ax == ax0: ytest = M_B_archive[(i-extra)*multival]
-            elif ax == ax1: ytest = mempool_archive[(i-extra)*multival]
-            elif ax == ax2: ytest = Block_fee_archive[(i-extra)*multival]
-            elif ax == ax3: ytest = P_archive[(i-extra)*multival]
-            if x[(i-extra)*multival] >= xmax:
-                ax.set_xlim(xmin, multiscale * xmax)
-                ax.figure.canvas.draw()
-                if ax == ax0: 
-                    x_adjustments += 1
-                    if x_adjustments % 2 == 0: # Every other x axis autoscale
-                        multival *= multiscale # Speed up simulation
-                        extra = i // multiscale  # Correct i*multival to current index. Skips around a bit, but simple.
-            if ytest >= ymax:
-                ax.set_ylim(ymin, 2 * ymax)
-                ax.figure.canvas.draw()
+
         # Update lines
-        line[0].set_data(x[:(i-extra)*multival] , M_B_archive[:(i-extra)*multival])   
-        line[1].set_data(x[:(i-extra)*multival], mempool_archive[:(i-extra)*multival])  
-        line[2].set_data(x[:(i-extra)*multival], Block_fee_archive[:(i-extra)*multival])  
-        line[3].set_data(x[:(i-extra)*multival], P_archive[:(i-extra)*multival])
+        line[1].set_data(x[:i*multival], M_B_archive[:i*multival])   
+        line[0].set_data(x[:i*multival], input_volume_archive[:i*multival])  
+        line[2].set_data(x[:i*multival], Block_fee_archive[:i*multival])  
+        line[3].set_data(x[:i*multival], P_archive[:i*multival])
         return line,
     
-    ani = animation.FuncAnimation(fig, animate, interval=1, repeat=False, save_count = 5000)
+    #ani = animation.FuncAnimation(fig, animate, interval=20, repeat=True, save_count = 500)
+    
+    
+    ani = animation.FuncAnimation(fig, animate, interval=12, repeat=False, save_count = 500)
     plt.tight_layout() # Plot padding
     
+    
     plt.show()
-    plt.pause(60)
+    plt.pause(15)
     plt.close()
     
-    #f = r"C:\Users\USER\Desktop\animation_v3.gif" 
+    #f = r"C:\Users\Node\Desktop\animation_v4.gif" 
     #writergif = animation.PillowWriter(fps=30) 
     #ani.save(f, writer=writergif)
