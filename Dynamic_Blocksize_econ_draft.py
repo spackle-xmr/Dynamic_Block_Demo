@@ -162,9 +162,8 @@ for i in range(n): # Process n blocks
             B = (M_B / M_N) - 1 # B can be thought of as % increase in block weight
             T_T = T_sim # Tx size for F_T calculation
             B_F_T = B # B value used to calculate F_T
-            if M_N - T_T < M_B < M_N: # If only a part of T_T is in penalty zone
-                T_T = T_T - (M_N - M_B) # Consider only portion of tx in penalty zone
-                B_F_T = 0 # Set (B value used to calculate F_T) = 0
+            if T_T > M_B - M_N: # If only a part of T_T is in penalty zone
+                T_T = M_B - M_N # Consider only portion of tx in penalty zone
             B_T = T_T / M_N # Increase from adding additional tx to block
             F_T = R_Base * (2 * B_F_T * B_T + B_T**2) # Additional fee required to overcome the increase in penalty, F_T = P_T
             if B_F_T + B_T <= 0: 
