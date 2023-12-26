@@ -1,4 +1,5 @@
 # Simulation of transaction ramp
+# R adaptation performed by Rucknium
 # This is a work in progress. Use at your own peril.
 
 # NOTE: R implementation gives slightly different results from Python
