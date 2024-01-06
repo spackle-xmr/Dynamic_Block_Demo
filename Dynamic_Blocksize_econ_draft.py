@@ -1,4 +1,5 @@
 # This is a work in progress. Use at your own peril.
+# This T_sim/LARGE_SIMULATION_MODE approach is hacky. Workable for now, but to be changed ASAP.
 
 import math
 import bisect
@@ -7,16 +8,18 @@ import matplotlib.animation as animation
 import numpy as np
 
 # CONFIGURATION
+n = 100000 # Number of blocks to simulate
+NETWORK_STEADY_STATE = 300000 # Steady state blocksize of network at start of simulation
 RUN_TYPE = 6 # 1 = Linear Transaction Ramp, 2 = Fast Linear Transaction Ramp, 3 = Fast Parabolic Transaction Ramp, 
 # 4 = Fast Exponential Transaction Ramp, 5 = Maximum flood, 6 = Configurable Transaction Ramp To Sine
 ADD_NOISE = 0 # Select whether to add noise to tx broadcast
 USERS_PAY_MORE = 0 # Select whether users respond to congestion by paying higher fees
 WALLET_CALC = 0 # Select whether to perform Wallet calculations. MUCH SLOWER
 PLOT_RESULT = 0 # Select whether to create plots/animations
+LARGE_SIMULATION_MODE = 0 # Select whether to speed up simulation by increasing T_sim (intended for massive block sizes)
+
 
 # Initialization
-n = 30000 # Number of blocks to simulate
-T_sim = 800 # tx size discretization step. 800 means tx can be 800, 1600, 2400... bytes. (must be <=900 to display min fee block expansion)
 B = 0 
 F_T = 0 # Additional fee to overcome penalty increase
 T_R = 3000 # Reference tx weight for fee
@@ -24,19 +27,22 @@ Z_M = 300000 # Guaranteed penalty free zone
 M_B = 100000 # Block weight in bytes
 M_L = 300000 # Effective Long term median, 100k blocks
 M_L_weight = 0 # M_L_weight to enter in M_L_list
-M_L_prev = 300000 # Previously effective long term median for last block
-M_S = 300000 # Effective short term median, 100 blocks
+M_L_prev = NETWORK_STEADY_STATE # Previously effective long term median for last block
+M_S = NETWORK_STEADY_STATE # Effective short term median, 100 blocks
 M_S_weight = 0 # M_S_weight to enter in M_S_list
-M_N = 300000 # Median for Penalty calculation
-R_Base = 0.6 # Block Reward
-M_B_max = 600000 # Maximum permitted size for next block
-M_L_list = [300000]*100000 # List of 100000 previous M_L values
+M_N = NETWORK_STEADY_STATE # Median for Penalty calculation
+R_Base = 0.6
+M_B_max = 2 * NETWORK_STEADY_STATE # Maximum permitted size for next block
+M_L_list = [NETWORK_STEADY_STATE]*100000 # List of 100000 previous M_L values
 sorted_M_L_list = sorted(M_L_list) # Sorted list of M_L values, used for median calc
-M_S_list = [300000]*100 # List of 100 previous M_S values
+M_S_list = [NETWORK_STEADY_STATE]*100 # List of 100 previous M_S values
 sorted_M_S_list = sorted(M_S_list) # Sorted list of M_S values, used for median calc
 mid_100k = 50000 # Middle index for size 100k lists, used for median calc
 mid_100 = 50 # Middle index for size 100 lists, used for median calc
 
+T_sim = 800 # tx size discretization step. 800 means tx can be 800, 1600, 2400... bytes. (must be <=900 to display min fee block expansion)
+T_sim_counter = 0
+T_sim_reset_counter = 0
 # Assume all tx are size T_sim. Each list index is a certain fee level, the value of each index is the number of tx
 # Highest fees are lowest index, lowest fees are highest index
 broadcast = [0]*2 # Newly broadcast tx data
@@ -45,11 +51,11 @@ fees = [0]*2 # fees paid at each level of mempool
 block_fee_total = 0 # total fee paid to create block
 blockfilled = [0]*2 # tx in mempool that failed to pay enough fees
 fee_set = [] # Calculated fee amount that must be paid to add each tx to a block.
-percent_response = 0
+percent_response = 0 # Initial value for the percent of users paying higher fees
 
 # Initialize Wallet Fee Lists
-M_LW_prev = 300000 # Previously effective long term wallet fee median
-M_BW_list =[100000]*99990 # List of 99990 previous M_BW values
+M_LW_prev = NETWORK_STEADY_STATE # Previously effective long term wallet fee median
+M_BW_list =[NETWORK_STEADY_STATE]*99990 # List of 99990 previous M_BW values
 M_BW_list.extend([0] * 10) # Add 10x 0 entries
 sorted_M_BW_list = sorted(M_BW_list) # Sorted list of 100k M_BW values
 M_LW_list = M_L_list[10:] # Remove 10 oldest entries from M_L_list
@@ -66,16 +72,17 @@ M_S_archive = [] # Short term median archive
 M_S_weight_archive = [] # Short term weight archive
 M_B_archive = [] # Block weight archive
 M_N_archive = [] # Penalty median archive
-broadcast_archive = [[0,0] for i in range(n)] # broadcast archive
-mempool_archive = [[0,0] for i in range(n)] # Mempool archive
-blockfilled_archive = [[0,0] for i in range(n)] # blockfilled archive
+broadcast_archive = [[0,0] for i in range(n)] # broadcast archive (in bytes)
+mempool_archive = [[0,0] for i in range(n)] # Mempool archive (in bytes)
+blockfilled_archive = [[0,0] for i in range(n)] # blockfilled archive (in bytes)
 fee_sum_archive = []
 P_archive = [] # Penalty archive
 Block_fee_archive = [] # Fees paid by tx included in block archive
 F_T_archive = [] # Fee needed to add another tx to block archive
 f_I_archive = [] # Minimum fee per byte archive
 input_volume_archive = [] # Broadcast tx volume archive (not split into fee levels)
-
+B_archive = []
+T_sim_archive = []
 
 for i in range(n): # Process n blocks
     
@@ -87,11 +94,38 @@ for i in range(n): # Process n blocks
     M_N = min(M_S, 50 * M_L) # Median for penalty calculation
     
     M_B_max = 2 * M_N # Maximum weight of next block
-    f_I = 0.95 * R_Base * T_R / (M_L**2) # Minimum fee per byte, M_F = M_L
+    f_R = R_Base * T_R / (M_L**2)
+    f_I = 0.95 * f_R # Minimum fee per byte, M_F = M_L
+    if f_I < 10**-12: f_I = 10**-12
     
-    # Define fees paid for each tx fee level
-    fees[1] = f_I * T_sim # lowest fee
-    fees[0] = 16 * fees[1] # medium fee
+    if LARGE_SIMULATION_MODE == 1:
+        #Improve simulation speed by scaling T_sim off M_S
+        scale_setting = M_S // Z_M # If the simulation goes into very large territory, decrease resolution of calculations
+        if T_sim <= scale_setting * 800 / 2:
+            T_sim_counter += 1
+            if T_sim_counter > 500:
+                for j in range(len(mempool)):
+                    mempool[j] = mempool[j] // 2
+                T_sim *= 2 # tx size discretization step
+                T_sim_counter = 0
+                #print("T_sim set to", T_sim)
+        if T_sim >= scale_setting * 800 * 2:
+            T_sim_counter += 1
+            if T_sim_counter > 500:
+                for j in range(len(mempool)):
+                    mempool[j] *= 2
+                T_sim /= 2 # tx size discretization
+                T_sim_counter = 0
+                #print("T_sim set to", T_sim)
+        if i > 100:
+            if M_B_archive[i-1] == M_B_archive[i-60]:
+                T_sim_reset_counter += 1
+                if T_sim_reset_counter > 20 and T_sim > 800 and M_S < M_N + T_sim: # Quelle coincidence! Large T_sim may be causing issues, decrease it
+                    for j in range(len(mempool)):
+                        mempool[j] *= 2
+                    T_sim /= 2 
+                    T_sim_reset_counter = 0
+                    #print("Decreased T_sim to ", T_sim, " at block ", i)
     
     # Broadcast new tx
     blockfilled[0] = 0  # Clear the record of tx which filled the last block
@@ -99,10 +133,10 @@ for i in range(n): # Process n blocks
     broadcast[0] = 0 # Clear the record of previously broadcast tx
     broadcast[1] = 0
     
-    if RUN_TYPE == 1: broadcast[1] = (300000 + 100 * i) // T_sim  #Linear Ramp
-    if RUN_TYPE == 2: broadcast[1] = (300000 + 10 * i) // T_sim  # Fast Linear Ramp starting at 100k
-    if RUN_TYPE == 3: broadcast[1] = ((316 + (i / 15))**2) // T_sim # Fast Parabolic Ramp starting at 100k
-    if RUN_TYPE == 4: broadcast[1] = (300000 * (1.6**(9.8 + (i / 50000)) - 99.75)) // T_sim  # Fast Exponential Ramp starting at 100k
+    if RUN_TYPE == 1: broadcast[1] = (Z_M + 100 * i) // T_sim  #Linear Ramp
+    if RUN_TYPE == 2: broadcast[1] = (Z_M + 800 * i) // T_sim  # Fast Linear Ramp
+    if RUN_TYPE == 3: broadcast[1] = ((316 + (i / 15))**2) // T_sim # Fast Parabolic Ramp
+    if RUN_TYPE == 4: broadcast[1] = (Z_M * (1.6**(9.8 + (i / 50000)) - 99.75)) // T_sim  # Fast Exponential Ramp
     if RUN_TYPE == 5: broadcast[1] = M_B_max // T_sim  # Maximum tx flood
     if RUN_TYPE == 6: 
         start_val = 300000 # Starting tx volume
@@ -114,7 +148,7 @@ for i in range(n): # Process n blocks
         if ramp_delay < i <= ramp_delay + ramp_time: #Ramp from 100kB to 1MB blocks over 720 blocks
             broadcast[1] = (start_val + math.floor((ramp_multiplier - 1)*start_val/ramp_time) * (i - ramp_delay)) // T_sim # Define total broadcast data volume during ramp
         if i > ramp_delay + ramp_time: 
-            broadcast[1] = ramp_multiplier * start_val // T_sim  + 220 * np.sin(i/802) # Ramp finished, broadcast variable blocks around new size
+            broadcast[1] = (ramp_multiplier * start_val  + 220 * np.sin(i/802) * 800) // T_sim # Ramp finished, broadcast variable blocks around new size
     input_volume_archive.append(broadcast[1])
     
     if ADD_NOISE == 1:
@@ -138,7 +172,11 @@ for i in range(n): # Process n blocks
     # Update mempool with broadcast
     for j in range(len(mempool)):
         mempool[j] += broadcast[j]
-        
+    
+    # Define fees paid for each tx fee level
+    fees[1] = f_R * T_sim # lowest fee
+    fees[0] = 16 * fees[1] # medium fee
+    
     # Build next block
     M_B = 0 # Begin building from empty block
     block_fee_total = 0 
@@ -155,29 +193,23 @@ for i in range(n): # Process n blocks
                 blockfilled[1] = l # save tx number failure
                 break_flag = 1
                 break
-        
-            M_B += T_sim # Add tx size to block
             
             # Check necessary fees to expand block to new size
             B = (M_B / M_N) - 1 # B can be thought of as % increase in block weight
             T_T = T_sim # Tx size for F_T calculation
-            B_F_T = B # B value used to calculate F_T
-            if T_T > M_B - M_N: # If only a part of T_T is in penalty zone
-                T_T = M_B - M_N # Consider only portion of tx in penalty zone
+            if T_T > M_B - M_N > 0: T_T = M_B - M_N # If only a part of T_T is in penalty zone consider only portion of tx in penalty zone
             B_T = T_T / M_N # Increase from adding additional tx to block
-            F_T = R_Base * (2 * B_F_T * B_T + B_T**2) # Additional fee required to overcome the increase in penalty, F_T = P_T
-            if B_F_T + B_T <= 0: 
-                F_T = 0 # Calculated F_T only valid for B + B_T > 0
+            F_T = R_Base * (2 * B * B_T + B_T**2) # Additional fee required to overcome the increase in penalty, F_T = P_T
+            if B + B_T <= 0: F_T = 0 # Calculated F_T only valid for B + B_T > 0
             
-            # Load cheapest fee set with the cheapest fees possible for each tx
-            fee_set.append(F_T)
+            fee_set.append(F_T) # Load cheapest fee set with the cheapest fees possible for each tx
             
             if fees[k] < F_T: # If not enough fees paid
-                M_B -= T_T # Remove proposed tx from block
                 blockfilled[0] = k # save fee failure
                 blockfilled[1] = l # save tx number failure
                 break_flag = 1
                 break
+            M_B += T_sim # Add tx size to block
     
     if all(num == 0 for num in blockfilled):
         if mempool[1] != 0:
@@ -259,14 +291,16 @@ for i in range(n): # Process n blocks
     M_B_archive.append(M_B) # Block weight archive
     M_N_archive.append(M_N) # Penalty median archive
     for item in range(len(mempool)):
-        mempool_archive[i][item] = mempool[item]
-        broadcast_archive[i][item] = broadcast[item] # broadcast archive
-        blockfilled_archive[i][item] = blockfilled[item]
+        mempool_archive[i][item] = T_sim * mempool[item]
+        broadcast_archive[i][item] = T_sim * broadcast[item] # broadcast archive
+    blockfilled_archive[i][item] = blockfilled[item]
     fee_sum_archive.append(sum(fee_set))
     F_T_archive.append(F_T)
     P_archive.append(P_B) # Penalty archive
     Block_fee_archive.append(block_fee_total) # Additional fee to overcome penalty increase archive
     f_I_archive.append(f_I) # Minimum fee per byte archive
+    B_archive.append(B)
+    T_sim_archive.append(T_sim)
     
     if i % 10000 == 0: print('Running iteration ', i) # Print running status
 
